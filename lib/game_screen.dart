@@ -1,6 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'models/game_history_entry.dart';
 import 'models/game_state.dart';
+import 'pause_overlay.dart';
+import 'settings_screen.dart';
+import 'stats_screen.dart';
 import 'widgets/completed_view.dart';
 import 'widgets/stock_view.dart';
 import 'widgets/tableau_view.dart';
@@ -18,15 +24,24 @@ class _GameScreenState extends State<GameScreen> {
   late final GameState _gameState;
   bool _winDialogShown = false;
 
+  // Ticks once a second purely to refresh the live elapsed-time display in
+  // the app bar; GameState itself only calls notifyListeners() on actual
+  // game events (moves, pause/resume, new game), not once per second.
+  Timer? _clockTimer;
+
   @override
   void initState() {
     super.initState();
     _gameState = GameState();
     _gameState.addListener(_onGameStateChanged);
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
     _gameState.removeListener(_onGameStateChanged);
     super.dispose();
   }
@@ -45,6 +60,26 @@ class _GameScreenState extends State<GameScreen> {
       _winDialogShown = false;
       _gameState.startNewGame();
     });
+  }
+
+  void _togglePause() {
+    if (_gameState.isPaused) {
+      _gameState.resume();
+    } else {
+      _gameState.pause();
+    }
+  }
+
+  void _openStats() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => StatsScreen(gameState: _gameState)),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => SettingsScreen(gameState: _gameState)),
+    );
   }
 
   void _showWinDialog() {
@@ -77,115 +112,160 @@ class _GameScreenState extends State<GameScreen> {
         title: const Text('Spider Solitaire'),
         backgroundColor: const Color(0xFF07401A),
         foregroundColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(22),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Time: ${formatDuration(_gameState.elapsed)}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(width: 18),
+                Text(
+                  'Moves: ${_gameState.moveCount}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
         actions: [
+          IconButton(
+            icon: Icon(_gameState.isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: _gameState.isPaused ? 'Resume' : 'Pause',
+            onPressed: _togglePause,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'New game',
             onPressed: _newGame,
           ),
+          IconButton(
+            icon: const Icon(Icons.bar_chart),
+            tooltip: 'Game history',
+            onPressed: _openStats,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: _openSettings,
+          ),
         ],
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            const columns = GameState.columnCount;
-            const horizontalPadding = 8.0;
-            const spacing = 6.0;
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  const columns = GameState.columnCount;
+                  const horizontalPadding = 8.0;
+                  const spacing = 6.0;
 
-            // Card width is derived from the available screen width so it
-            // scales up meaningfully on tablets rather than being capped
-            // to a small phone-sized max: on a phone (~360-420dp wide) 10
-            // columns clamp to the minimum and the board scrolls
-            // horizontally; on a tablet (~700-1400dp wide) columns/width
-            // grows well past phone size, giving visibly larger, more
-            // legible cards instead of just more empty space around
-            // small ones. The upper clamp only guards against absurdly
-            // huge cards on ultra-wide displays.
-            final availableWidth =
-                constraints.maxWidth - horizontalPadding * 2 - spacing * (columns - 1);
-            var cardWidth = availableWidth / columns;
-            // `num.clamp` returns `num`, not `double` (a well-known Dart
-            // gotcha) — `.toDouble()` keeps `cardWidth` a `double` so it
-            // type-checks against the rest of this method.
-            cardWidth = cardWidth.clamp(60.0, 190.0).toDouble();
-            final cardHeight = cardWidth * 1.45;
-            final faceUpStep = cardHeight * 0.30;
+                  // Card width is derived from the available screen width so it
+                  // scales up meaningfully on tablets rather than being capped
+                  // to a small phone-sized max: on a phone (~360-420dp wide) 10
+                  // columns clamp to the minimum and the board scrolls
+                  // horizontally; on a tablet (~700-1400dp wide) columns/width
+                  // grows well past phone size, giving visibly larger, more
+                  // legible cards instead of just more empty space around
+                  // small ones. The upper clamp only guards against absurdly
+                  // huge cards on ultra-wide displays.
+                  final availableWidth =
+                      constraints.maxWidth - horizontalPadding * 2 - spacing * (columns - 1);
+                  var cardWidth = availableWidth / columns;
+                  // `num.clamp` returns `num`, not `double` (a well-known Dart
+                  // gotcha) — `.toDouble()` keeps `cardWidth` a `double` so it
+                  // type-checks against the rest of this method.
+                  cardWidth = cardWidth.clamp(60.0, 190.0).toDouble();
+                  final cardHeight = cardWidth * 1.45;
+                  final faceUpStep = cardHeight * 0.30;
 
-            var maxColumnLength = 1;
-            for (final column in _gameState.tableau) {
-              if (column.length > maxColumnLength) maxColumnLength = column.length;
-            }
-            final tableauContentHeight =
-                cardHeight + faceUpStep * (maxColumnLength - 1);
+                  var maxColumnLength = 1;
+                  for (final column in _gameState.tableau) {
+                    if (column.length > maxColumnLength) maxColumnLength = column.length;
+                  }
+                  final tableauContentHeight =
+                      cardHeight + faceUpStep * (maxColumnLength - 1);
 
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 12),
-              child: Column(
-                // `stretch` (rather than `start`) is deliberate: it gives
-                // the Expanded scroll area below a definite, full-width
-                // constraint to hand down to its nested vertical/horizontal
-                // SingleChildScrollViews. Without it, a scrollable nested
-                // inside a Column's loose cross-axis constraint has an
-                // ambiguous width, which risks collapsing the whole
-                // tableau to zero width instead of the intended
-                // screen-filling, horizontally-scrollable board.
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Stock pile on the left, completed-sequences counter on
-                  // the right.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StockPileWidget(
-                        gameState: _gameState,
-                        width: cardWidth * 0.75,
-                        height: cardHeight * 0.75,
-                      ),
-                      CompletedSequencesView(gameState: _gameState),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Ten tableau columns. Wrapped in an inner vertical
-                  // scroll (safety net for short screens / deep columns
-                  // after several stock deals) around an inner horizontal
-                  // scroll (10 columns rarely fit a single phone width).
-                  // Keeping these scrolls scoped to just the tableau -
-                  // rather than wrapping the whole page - keeps the top
-                  // bar always visible and limits how much the tableau's
-                  // own scroll gestures can compete with dragging a card
-                  // (see tableau_view.dart for why cards use
-                  // LongPressDraggable for the same reason).
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.vertical,
-                      child: SizedBox(
-                        height: tableauContentHeight,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              for (var i = 0; i < columns; i++) ...[
-                                if (i > 0) SizedBox(width: spacing),
-                                TableauColumnWidget(
-                                  gameState: _gameState,
-                                  columnIndex: i,
-                                  cardWidth: cardWidth,
-                                  cardHeight: cardHeight,
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 12),
+                    child: Column(
+                      // `stretch` (rather than `start`) is deliberate: it gives
+                      // the Expanded scroll area below a definite, full-width
+                      // constraint to hand down to its nested vertical/horizontal
+                      // SingleChildScrollViews. Without it, a scrollable nested
+                      // inside a Column's loose cross-axis constraint has an
+                      // ambiguous width, which risks collapsing the whole
+                      // tableau to zero width instead of the intended
+                      // screen-filling, horizontally-scrollable board.
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Stock pile on the left, completed-sequences counter on
+                        // the right.
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            StockPileWidget(
+                              gameState: _gameState,
+                              width: cardWidth * 0.75,
+                              height: cardHeight * 0.75,
+                            ),
+                            CompletedSequencesView(gameState: _gameState),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // Ten tableau columns. Wrapped in an inner vertical
+                        // scroll (safety net for short screens / deep columns
+                        // after several stock deals) around an inner horizontal
+                        // scroll (10 columns rarely fit a single phone width).
+                        // Keeping these scrolls scoped to just the tableau -
+                        // rather than wrapping the whole page - keeps the top
+                        // bar always visible and limits how much the tableau's
+                        // own scroll gestures can compete with dragging a card
+                        // (see tableau_view.dart for why cards use
+                        // LongPressDraggable for the same reason).
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.vertical,
+                            child: SizedBox(
+                              height: tableauContentHeight,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    for (var i = 0; i < columns; i++) ...[
+                                      if (i > 0) SizedBox(width: spacing),
+                                      TableauColumnWidget(
+                                        gameState: _gameState,
+                                        columnIndex: i,
+                                        cardWidth: cardWidth,
+                                        cardHeight: cardHeight,
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              ],
-                            ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
-            );
-          },
-        ),
+            ),
+          ),
+          if (_gameState.isPaused)
+            Positioned.fill(
+              child: PauseOverlay(onResume: () => _gameState.resume()),
+            ),
+        ],
       ),
     );
   }
