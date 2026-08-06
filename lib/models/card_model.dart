@@ -93,26 +93,40 @@ extension RankProperties on Rank {
   }
 }
 
-/// A single playing card. Mutable [faceUp] flag so the same card object
-/// can be flipped in place as it moves between piles.
+/// A single playing card.
+///
+/// This variant plays with two combined standard decks (104 cards), so the
+/// same (suit, rank) pair exists twice at once. [copyIndex] (0 or 1) makes
+/// each physical card instance distinguishable/unique (used for stable
+/// widget [Key]s) even though both copies of e.g. King of Hearts render the
+/// exact same portrait asset — there is only one photo per role+suit, not
+/// per role+suit+deck-copy.
+///
+/// [faceUp] is kept (rather than removed) because [PlayingCardWidget]
+/// already renders it generically; this variant simply always deals cards
+/// with faceUp == true and never flips one down.
 class PlayingCard {
   final Suit suit;
   final Rank rank;
+  final int copyIndex;
   bool faceUp;
 
   PlayingCard({
     required this.suit,
     required this.rank,
-    this.faceUp = false,
+    this.copyIndex = 0,
+    this.faceUp = true,
   });
 
   bool get isRed => suit.isRed;
 
-  /// Stable identity string, handy for Flutter `Key`s.
-  String get id => '${rank.name}_${suit.name}';
+  /// Stable identity string, unique per physical card instance (including
+  /// across the two decks). Handy for Flutter `Key`s.
+  String get id => '${rank.name}_${suit.name}_$copyIndex';
 
   /// Path to the custom portrait asset for King/Queen/Jack cards.
-  /// Only valid when [Rank.hasPortrait] is true.
+  /// Only valid when [Rank.hasPortrait] is true. Both deck-copies of a
+  /// given rank+suit intentionally point at the same image file.
   String get portraitAssetPath =>
       'assets/cards/${rank.frenchAssetName}_${suit.frenchAssetName}.jpg';
 
@@ -120,11 +134,14 @@ class PlayingCard {
   String toString() => id;
 }
 
-/// Builds a standard 52 card deck (all face-down) and shuffles it.
-List<PlayingCard> buildShuffledDeck({Random? random}) {
+/// Builds two combined, shuffled standard 52-card decks (104 cards total,
+/// all face-up) as used by this Spider-style variant.
+List<PlayingCard> buildDoubleDeckShuffled({Random? random}) {
   final deck = <PlayingCard>[
-    for (final suit in Suit.values)
-      for (final rank in Rank.values) PlayingCard(suit: suit, rank: rank),
+    for (var copy = 0; copy < 2; copy++)
+      for (final suit in Suit.values)
+        for (final rank in Rank.values)
+          PlayingCard(suit: suit, rank: rank, copyIndex: copy, faceUp: true),
   ];
   deck.shuffle(random ?? Random());
   return deck;

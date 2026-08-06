@@ -1,5 +1,5 @@
 name: solitaire_app
-description: "A Klondike solitaire game with custom portrait face cards."
+description: "A Spider-style solitaire game with custom portrait face cards."
 publish_to: 'none'
 version: 1.0.0+1
 
